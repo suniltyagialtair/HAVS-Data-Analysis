@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+*.egg
+dist/
+build/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Pipeline outputs
+results/
+*.png
+*.xlsx
+*.csv
+_checkpoint.json
+
+# But keep docs samples
+!docs/*.png
+
+# Virtual environment
+venv/
+.env/
