@@ -31,3 +31,4 @@ _checkpoint.json
 # Virtual environment
 venv/
 .env/
+/sample_wav_files
