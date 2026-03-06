@@ -140,7 +140,7 @@ def save_file_spectrogram(stft_data, output_dir):
 # 2. EVENT SPECTROGRAMS (3-panel)
 # =====================================================================
 
-def save_event_spectrograms(events, all_files, output_dir, rms_stats, all_windows=None):
+def save_event_spectrograms(events, all_files, output_dir, rms_stats, all_windows=None, audio_data=None, sr=None):
     """Generate 3-panel event spectrograms for high-energy events.
 
     Panels:
@@ -156,11 +156,11 @@ def save_event_spectrograms(events, all_files, output_dir, rms_stats, all_window
         output_dir: directory to save PNGs
         rms_stats: dict with rms_mean, rms_threshold
         all_windows: list of all window dicts (for RMS profile)
+        audio_data: optional pre-loaded numpy array of audio for entire session
+        sr: optional sample rate for audio_data
 
     Returns list of generated file paths.
     """
-    import soundfile as sf
-
     paths = []
     big_events = [e for e in events if e.get('rms_ratio', 0) >= EVENT_SPEC_MIN_RMS_FACTOR]
 
@@ -172,7 +172,7 @@ def save_event_spectrograms(events, all_files, output_dir, rms_stats, all_window
 
     for ev in sorted(big_events, key=lambda e: e['start']):
         try:
-            path = _plot_single_event(ev, all_files, output_dir, rms_stats, all_windows)
+            path = _plot_single_event(ev, all_files, output_dir, rms_stats, all_windows, audio_data, sr)
             if path:
                 paths.append(path)
         except Exception as exc:
@@ -182,7 +182,7 @@ def save_event_spectrograms(events, all_files, output_dir, rms_stats, all_window
     return paths
 
 
-def save_demon_plots(events, all_files, output_dir, rms_stats):
+def save_demon_plots(events, all_files, output_dir, rms_stats, audio_data=None, sr=None):
     """Generate separate DEMON modulation spectrum plots for high-energy events.
 
     Each plot shows the DEMON envelope spectrum (0–15 Hz) computed from a
@@ -194,11 +194,11 @@ def save_demon_plots(events, all_files, output_dir, rms_stats):
         all_files: list of file_info dicts
         output_dir: directory to save PNGs
         rms_stats: dict with rms_mean, rms_threshold
+        audio_data: optional pre-loaded numpy array of audio for entire session
+        sr: optional sample rate for audio_data
 
     Returns list of generated file paths.
     """
-    import soundfile as sf
-
     try:
         from stage3_demon import compute_demon_spectrum, detect_blade_rate
     except ImportError:
@@ -219,7 +219,7 @@ def save_demon_plots(events, all_files, output_dir, rms_stats):
     for ev in sorted(big_events, key=lambda e: e['start']):
         try:
             path = _plot_single_demon(ev, all_files, output_dir, rms_stats,
-                                       compute_demon_spectrum, detect_blade_rate)
+                                       compute_demon_spectrum, detect_blade_rate, audio_data, sr)
             if path:
                 paths.append(path)
         except Exception as exc:
@@ -230,7 +230,7 @@ def save_demon_plots(events, all_files, output_dir, rms_stats):
 
 
 def _plot_single_demon(ev, all_files, output_dir, rms_stats,
-                        compute_demon_spectrum, detect_blade_rate):
+                        compute_demon_spectrum, detect_blade_rate, audio_data=None, sr=None):
     """Generate a single DEMON modulation spectrum plot for an event."""
     import soundfile as sf
 
@@ -239,45 +239,67 @@ def _plot_single_demon(ev, all_files, output_dir, rms_stats,
     load_start = peak_time - timedelta(seconds=30)
     load_end = peak_time + timedelta(seconds=30)
 
-    overlapping = []
-    for fi in all_files:
-        if fi['start_ts'] is None:
-            continue
-        file_end_approx = fi['start_ts'] + timedelta(hours=1)
-        if fi['start_ts'] <= load_end and file_end_approx >= load_start:
-            overlapping.append(fi)
+    if audio_data is not None and sr is not None:
+        # Assume audio_data starts at ev['session_start'] or similar. 
+        # Since main.py passes audio_data for the WHOLE session, and we have session times.
+        # We need the base start time of audio_data. 
+        # For simplicity, we can use ev['start'] as a reference if we know it's within audio_data.
+        # Let's assume ev['start'] is relative to some session start.
+        # Actually, if we have ev['start'] as datetime, and we know audio_data start as datetime.
+        # Let's use a simplified approach: use ev['peak_time'] and assume audio_data 
+        # is the entire session audio. We need the session start time.
+        
+        # We'll need ev['session_start_ts'] to be present.
+        session_start = ev.get('session_start_ts', ev['start'] - timedelta(seconds=ev.get('time_offset_sec', 0)))
+        
+        peak_offset = (peak_time - session_start).total_seconds()
+        peak_sample = int(peak_offset * sr)
+        window_samples = int(30 * sr)
+        
+        peak_start = max(0, peak_sample - window_samples // 2)
+        peak_end = min(len(audio_data), peak_start + window_samples)
+        peak_chunk = audio_data[peak_start:peak_end]
+        combined_sr = sr
+    else:
+        overlapping = []
+        for fi in all_files:
+            if fi['start_ts'] is None:
+                continue
+            file_end_approx = fi['start_ts'] + timedelta(hours=1)
+            if fi['start_ts'] <= load_end and file_end_approx >= load_start:
+                overlapping.append(fi)
 
-    if not overlapping:
-        return None
+        if not overlapping:
+            return None
 
-    overlapping = sorted(overlapping, key=lambda f: f['start_ts'])
+        overlapping = sorted(overlapping, key=lambda f: f['start_ts'])
 
-    # Load and extract the 30s peak window
-    audio_segments = []
-    combined_start = overlapping[0]['start_ts']
-    combined_sr = None
+        # Load and extract the 30s peak window
+        audio_segments = []
+        combined_start = overlapping[0]['start_ts']
+        combined_sr = None
 
-    for fi in overlapping:
-        try:
-            data, sr = sf.read(fi['path'], dtype='float64')
-            if data.ndim > 1:
-                data = data[:, 0]
-            combined_sr = sr
-            audio_segments.append(data)
-        except Exception:
-            continue
+        for fi in overlapping:
+            try:
+                data, sr_file = sf.read(fi['path'], dtype='float64')
+                if data.ndim > 1:
+                    data = data[:, 0]
+                combined_sr = sr_file
+                audio_segments.append(data)
+            except Exception:
+                continue
 
-    if not audio_segments or combined_sr is None:
-        return None
+        if not audio_segments or combined_sr is None:
+            return None
 
-    segment = np.concatenate(audio_segments)
-    peak_offset = (peak_time - combined_start).total_seconds()
-    peak_sample = int(peak_offset * combined_sr)
-    window_samples = int(30 * combined_sr)
+        segment = np.concatenate(audio_segments)
+        peak_offset = (peak_time - combined_start).total_seconds()
+        peak_sample = int(peak_offset * combined_sr)
+        window_samples = int(30 * combined_sr)
 
-    peak_start = max(0, peak_sample - window_samples // 2)
-    peak_end = min(len(segment), peak_start + window_samples)
-    peak_chunk = segment[peak_start:peak_end]
+        peak_start = max(0, peak_sample - window_samples // 2)
+        peak_end = min(len(segment), peak_start + window_samples)
+        peak_chunk = segment[peak_start:peak_end]
 
     if len(peak_chunk) < combined_sr * 5:
         return None
@@ -375,7 +397,7 @@ def _plot_single_demon(ev, all_files, output_dir, rms_stats,
     return path
 
 
-def _plot_single_event(ev, all_files, output_dir, rms_stats, all_windows):
+def _plot_single_event(ev, all_files, output_dir, rms_stats, all_windows, audio_data=None, sr=None):
     """Generate a single 3-panel event spectrogram."""
     import soundfile as sf
 
@@ -383,57 +405,67 @@ def _plot_single_event(ev, all_files, output_dir, rms_stats, all_windows):
     t_start = ev['start'] - pad
     t_end = ev['end'] + pad
 
-    # Find overlapping WAV files
-    overlapping = []
-    for fi in all_files:
-        if fi['start_ts'] is None:
-            continue
-        file_end_approx = fi['start_ts'] + timedelta(hours=1)
-        if fi['start_ts'] <= t_end and file_end_approx >= t_start:
-            overlapping.append(fi)
+    if audio_data is not None and sr is not None:
+        session_start = ev.get('session_start_ts', ev['start'] - timedelta(seconds=ev.get('time_offset_sec', 0)))
+        
+        trim_start = int((t_start - session_start).total_seconds() * sr)
+        trim_end = int((t_end - session_start).total_seconds() * sr)
+        trim_start = max(0, trim_start)
+        trim_end = min(len(audio_data), trim_end)
+        segment = audio_data[trim_start:trim_end]
+        combined_sr = sr
+    else:
+        # Find overlapping WAV files
+        overlapping = []
+        for fi in all_files:
+            if fi['start_ts'] is None:
+                continue
+            file_end_approx = fi['start_ts'] + timedelta(hours=1)
+            if fi['start_ts'] <= t_end and file_end_approx >= t_start:
+                overlapping.append(fi)
 
-    if not overlapping:
-        return None
+        if not overlapping:
+            return None
 
-    overlapping = sorted(overlapping, key=lambda f: f['start_ts'])
+        overlapping = sorted(overlapping, key=lambda f: f['start_ts'])
 
-    # Load and concatenate audio
-    audio_segments = []
-    combined_start = overlapping[0]['start_ts']
-    combined_sr = None
+        # Load and concatenate audio
+        audio_segments = []
+        combined_start = overlapping[0]['start_ts']
+        combined_sr = None
 
-    for fi in overlapping:
-        try:
-            audio, sr = sf.read(fi['path'])
-            if audio.ndim > 1:
-                audio = audio[:, 0]
-            audio_segments.append((fi['start_ts'], audio, sr))
-            combined_sr = sr
-        except Exception:
-            continue
+        for fi in overlapping:
+            try:
+                audio, sr_file = sf.read(fi['path'])
+                if audio.ndim > 1:
+                    audio = audio[:, 0]
+                audio_segments.append((fi['start_ts'], audio, sr_file))
+                combined_sr = sr_file
+            except Exception:
+                continue
 
-    if not audio_segments or combined_sr is None:
-        return None
+        if not audio_segments or combined_sr is None:
+            return None
 
-    # Combine into single array
-    total_seconds = (t_end - combined_start).total_seconds()
-    total_samples = int(total_seconds * combined_sr)
-    combined = np.zeros(total_samples)
+        # Combine into single array
+        total_seconds = (t_end - combined_start).total_seconds()
+        total_samples = int(total_seconds * combined_sr)
+        combined = np.zeros(total_samples)
 
-    for ts, audio, sr in audio_segments:
-        offset = int((ts - combined_start).total_seconds() * sr)
-        end = min(offset + len(audio), len(combined))
-        actual_len = end - max(offset, 0)
-        if actual_len > 0:
-            start_idx = max(0, -offset)
-            combined[max(offset, 0):end] = audio[start_idx:start_idx + actual_len]
+        for ts, audio, sr_file in audio_segments:
+            offset = int((ts - combined_start).total_seconds() * sr_file)
+            end = min(offset + len(audio), len(combined))
+            actual_len = end - max(offset, 0)
+            if actual_len > 0:
+                start_idx = max(0, -offset)
+                combined[max(offset, 0):end] = audio[start_idx:start_idx + actual_len]
 
-    # Trim to event window
-    trim_start = int((t_start - combined_start).total_seconds() * combined_sr)
-    trim_end = int((t_end - combined_start).total_seconds() * combined_sr)
-    trim_start = max(0, trim_start)
-    trim_end = min(len(combined), trim_end)
-    segment = combined[trim_start:trim_end]
+        # Trim to event window
+        trim_start = int((t_start - combined_start).total_seconds() * combined_sr)
+        trim_end = int((t_end - combined_start).total_seconds() * combined_sr)
+        trim_start = max(0, trim_start)
+        trim_end = min(len(combined), trim_end)
+        segment = combined[trim_start:trim_end]
 
     if len(segment) < combined_sr * 10:
         return None

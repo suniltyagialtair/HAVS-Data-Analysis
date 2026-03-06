@@ -82,30 +82,13 @@ def discover_wav_files(input_dirs, keep_sessions=None):
     return all_files
 
 
-def process_one_file(file_info, file_idx, total_files, rms_mean_estimate=None):
-    """Process a single WAV file through all three stages."""
-    fname = file_info['filename']
-    fpath = file_info['path']
-    file_start = file_info['start_ts']
-    session = file_info['session']
-
-    print(f'  [{file_idx+1}/{total_files}] session_{session} — '
-          f'{file_start.strftime("%d %b %H:%M") if file_start else "unknown"}')
-
-    try:
-        audio, sr = sf.read(fpath)
-    except Exception as e:
-        print(f'    ERROR reading file: {e}')
-        return [], None
-
-    if audio.ndim > 1:
-        audio = audio[:, 0]
-
+def process_data(audio, sr, file_start, session, rms_mean_estimate=None):
+    """Core analysis logic for a single session of audio data."""
     duration_sec = len(audio) / sr
     print(f'    {sr} Hz, {duration_sec:.0f}s, {len(audio)/1e6:.1f}M samples')
 
     if file_start is None:
-        file_start = datetime(2026, 1, 1) + timedelta(seconds=file_idx * 3600)
+        file_start = datetime(2026, 1, 1)
 
     # Stage 1
     windows = stage1_rms.compute_rms_windows(audio, sr, file_start)
@@ -163,12 +146,18 @@ def process_one_file(file_info, file_idx, total_files, rms_mean_estimate=None):
             })
 
     for w in windows:
-        w['file'] = fname
+        w['file'] = f'session_{session}'
         w['session'] = session
         w['sample_rate'] = sr
 
     for w in windows:
         w.pop('audio_chunk', None)
+
+    stft_data = {
+        'freqs': freqs, 'times': stft_times, 'spec_db': spec_db,
+        'file_start': file_start, 'session': session, 'sr': sr,
+        'persistent': persistent,
+    }
 
     n_persistent = len(persistent)
     if persistent:
@@ -177,13 +166,34 @@ def process_one_file(file_info, file_idx, total_files, rms_mean_estimate=None):
         top_freqs = 'none'
     print(f'    {len(windows)} windows, {n_persistent} persistent tonals: {top_freqs}')
 
-    stft_data = {
-        'freqs': freqs, 'times': stft_times, 'spec_db': spec_db,
-        'file_start': file_start, 'session': session, 'sr': sr,
-        'persistent': persistent,
-    }
+    return windows, stft_data
 
-    del audio, Sxx
+
+def process_one_file(file_info, file_idx, total_files, rms_mean_estimate=None):
+    """Process a single WAV file through all three stages."""
+    fname = file_info['filename']
+    fpath = file_info['path']
+    file_start = file_info['start_ts']
+    session = file_info['session']
+
+    print(f'  [{file_idx+1}/{total_files}] session_{session} — '
+          f'{file_start.strftime("%d %b %H:%M") if file_start else "unknown"}')
+
+    try:
+        audio, sr = sf.read(fpath)
+    except Exception as e:
+        print(f'    ERROR reading file: {e}')
+        return [], None
+
+    if audio.ndim > 1:
+        audio = audio[:, 0]
+
+    if file_start is None:
+        file_start = datetime(2026, 1, 1) + timedelta(seconds=file_idx * 3600)
+
+    windows, stft_data = process_data(audio, sr, file_start, session, rms_mean_estimate)
+
+    del audio
     gc.collect()
 
     return windows, stft_data
