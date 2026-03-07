@@ -130,8 +130,16 @@ def save_file_spectrogram(stft_data, output_dir):
         color=STYLE['text'], fontsize=13, fontweight='bold', pad=12
     )
 
+    # Format session ID for filename
+    if isinstance(session, int):
+        session_str = f"{session:03d}"
+    elif session is not None:
+        session_str = str(session)
+    else:
+        session_str = "unknown"
+
     plt.tight_layout()
-    path = os.path.join(output_dir, f'lofar_session_{session:03d}.png')
+    path = os.path.join(output_dir, f'lofar_session_{session_str}.png')
     _save_fig(fig, path, dpi=150)
     return path
 
