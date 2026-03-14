@@ -19,8 +19,6 @@ Functions:
 
 import os
 import numpy as np
-import matplotlib
-matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from matplotlib.patches import FancyBboxPatch
 from matplotlib.dates import DateFormatter
@@ -65,9 +63,10 @@ def _style_figure(fig):
 
 
 def _save_fig(fig, path, dpi=150):
-    """Save figure and close."""
+    """Save figure and prepare it for interactive display."""
     fig.savefig(path, dpi=dpi, facecolor=STYLE['bg'], bbox_inches='tight')
-    plt.close(fig)
+    if fig.canvas.manager:
+        fig.canvas.manager.set_window_title(os.path.basename(path))
     print(f'  Saved: {path}')
 
 
