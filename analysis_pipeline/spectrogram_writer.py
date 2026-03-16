@@ -120,7 +120,8 @@ def save_file_spectrogram(stft_data, output_dir):
     ax.set_ylabel('Frequency (Hz)', color=STYLE['text'], fontsize=11)
     ax.set_xlabel('Time (IST)', color=STYLE['text'], fontsize=11)
     ax.set_ylim(0, FREQ_MAX_HZ)
-    ax.xaxis.set_major_formatter(DateFormatter('%H:%M'))
+    tz_ist = datetime.timezone(timedelta(hours=5, minutes=30))
+    ax.xaxis.set_major_formatter(DateFormatter('%H:%M', tz=tz_ist))
 
     title_date = file_start.strftime('%d %b %Y %H:%M')
     n_tonals = len(persistent)
@@ -492,7 +493,8 @@ def _plot_single_event(ev, all_files, output_dir, rms_stats, all_windows, audio_
                               gridspec_kw={'height_ratios': [3, 1, 1]})
 
     # Consistent time formatting for all panels
-    time_fmt = DateFormatter('%H:%M')
+    tz_ist = datetime.timezone(timedelta(hours=5, minutes=30))
+    time_fmt = DateFormatter('%H:%M', tz=tz_ist)
 
     # Panel 1: LOFAR Spectrogram
     ax = axes[0]
@@ -645,7 +647,8 @@ def save_timeline(all_windows, rms_stats, output_dir):
     ax.scatter(nz_times, nz_freqs, c=STYLE['highlight'], s=3, alpha=0.4)
     ax.set_ylabel('Strongest Tonal (Hz)', color=STYLE['text'], fontsize=11)
     ax.set_ylim(0, FREQ_MAX_HZ)
-    ax.xaxis.set_major_formatter(DateFormatter('%d %b\n%H:%M'))
+    tz_ist = datetime.timezone(timedelta(hours=5, minutes=30))
+    ax.xaxis.set_major_formatter(DateFormatter('%d %b\n%H:%M', tz=tz_ist))
     ax.set_xlabel('Time (IST)', color=STYLE['text'], fontsize=11)
 
     plt.tight_layout()
@@ -720,8 +723,9 @@ def save_distributions(all_windows, rms_stats, output_dir):
                label=f'Mean={rms_mean:.5f}')
     ax.axhline(thresh, color=STYLE['red'], linestyle='--', alpha=0.7,
                label=f'{RMS_SIGMA_THRESHOLD}σ={thresh:.5f}')
-    ax.xaxis.set_major_formatter(DateFormatter('%d\n%H'))
-    ax.set_xlabel('Time', color=STYLE['text'])
+    tz_ist = datetime.timezone(timedelta(hours=5, minutes=30))
+    ax.xaxis.set_major_formatter(DateFormatter('%d\n%H', tz=tz_ist))
+    ax.set_xlabel('Time (IST)', color=STYLE['text'])
     ax.set_ylabel('Mean RMS Energy', color=STYLE['text'])
     ax.set_title('Hourly Mean RMS Energy', color=STYLE['text'], fontsize=11)
     ax.legend(fontsize=8, facecolor=STYLE['bg'], edgecolor=STYLE['box_edge'],
@@ -806,7 +810,8 @@ def save_events_detail(all_windows, events, output_dir):
         title = (f"{ev['start'].strftime('%d %b %H:%M')}–{ev['end'].strftime('%H:%M')} "
                  f"({rms_ratio:.0f}× bkg) — {assessment}")
         ax.set_title(title, color=STYLE['text'], fontsize=10)
-        ax.xaxis.set_major_formatter(DateFormatter('%H:%M'))
+        tz_ist = datetime.timezone(timedelta(hours=5, minutes=30))
+        ax.xaxis.set_major_formatter(DateFormatter('%H:%M', tz=tz_ist))
 
     plt.suptitle('Major Acoustic Events — Detail View', color=STYLE['text'],
                  fontsize=14, fontweight='bold')
